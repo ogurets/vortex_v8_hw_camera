@@ -3,13 +3,12 @@
 
 /****************************************************************************************************/
 #include <linux/ioctl.h>
-
 /****************************************************************************************************/
 #define	SNR_ITEM_NUM	5
 
 /****************************************************************************************************/
-typedef enum _CAM_CAP_MODE 
-{	
+typedef enum _CAM_CAP_MODE
+{
 	CAP_NORMAL  =   0,
 	CAP_TRIGER,
 	CAP_WAITDONE
@@ -50,32 +49,32 @@ struct vtools_reg {
 #define V8CIF_IOC_MAGIC				'c'
 
 
-/*--------------------------------------------------------------------------	
+/*--------------------------------------------------------------------------
 	power on the front or back sensor according to the parameter
 	0: Main(Back) sensor
-	1: Front sensor		
+	1: Front sensor
 --------------------------------------------------------------------------*/
-#define V8CIF_SNR_PWRON				_IOR( V8CIF_IOC_MAGIC, 1, UINT32 )			
+#define V8CIF_SNR_PWRON				_IOR( V8CIF_IOC_MAGIC, 1, UINT32 )
 
-/*--------------------------------------------------------------------------	
+/*--------------------------------------------------------------------------
 	Get the current sensor's info, such as yuv type, jpeg supported,
 	item num and size from kernel to hal of android. So the android
-	could select and set the right item of sensor according to the 
+	could select and set the right item of sensor according to the
 	application.
 --------------------------------------------------------------------------*/
-#define V8CIF_SNR_GETINFO			_IOR( V8CIF_IOC_MAGIC, 2, V8CIFSNRINFO )	
+#define V8CIF_SNR_GETINFO			_IOR( V8CIF_IOC_MAGIC, 2, V8CIFSNRINFO )
 
 /*--------------------------------------------------------------------------
 	Config the current sensor's right item according to the parameter.
 --------------------------------------------------------------------------*/
-#define V8CIF_SNR_CFG				_IOR( V8CIF_IOC_MAGIC, 3, UINT32 )			
+#define V8CIF_SNR_CFG				_IOR( V8CIF_IOC_MAGIC, 3, UINT32 )
 
 /*--------------------------------------------------------------------------
 	power down the front or back sensor according to the parameter
 	0: Main(Back) sensor
-	1: Front sensor		
+	1: Front sensor
 --------------------------------------------------------------------------*/
-#define V8CIF_SNR_PWRDOWN			_IOR( V8CIF_IOC_MAGIC, 4, UINT32 )			
+#define V8CIF_SNR_PWRDOWN			_IOR( V8CIF_IOC_MAGIC, 4, UINT32 )
 
 /*--------------------------------------------------------------------------
 	Config the cif's preview path according to the parameter.
@@ -99,7 +98,7 @@ struct vtools_reg {
 
 /*--------------------------------------------------------------------------
 	Set the preview path special effect.
-	
+
 	input:
 	mode: 	0 -- bypass
 			1 -- specia effect
@@ -117,7 +116,7 @@ struct vtools_reg {
 
 /*--------------------------------------------------------------------------
 	Set the capture path special effect.
-	
+
 	input:
 	mode: 	0 -- bypass
 			1 -- specia effect
@@ -135,7 +134,7 @@ struct vtools_reg {
 
 /*--------------------------------------------------------------------------
 	Set the both cap and pre path special effect.
-	
+
 	input:
 	mode: 	0 -- bypass
 			1 -- specia effect
@@ -167,7 +166,7 @@ struct vtools_reg {
 #define V8CIF_SNR_REG_RD			_IOR( V8CIF_IOC_MAGIC, 57, struct vtools_reg )
 #define V8CIF_SNR_REG_WR			_IOW( V8CIF_IOC_MAGIC, 58, struct vtools_reg )
 
-																					
+
 #define V8CIF_IOC_MAXNR				60
 
 /****************************************************************************************************/
