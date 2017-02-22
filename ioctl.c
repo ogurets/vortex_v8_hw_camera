@@ -1,9 +1,10 @@
 #include <fcntl.h>      // open
-#include <unistd.h>     // exit
+#include <unistd.h>     // exit, getpagesize
 #include <sys/ioctl.h>  // ioctl
 #include <stdio.h>      // printf
 #include <stdlib.h>     // exit
 #include <sys/mman.h>   // mmap, munmap
+#include <memory.h>     // memset
 
 #define UINT32 unsigned int
 
@@ -12,6 +13,12 @@
 
 #define DEVICE_FILE_NAME "/dev/cif"
 #define PMEM_VDEC_FILE_NAME "/dev/pmem-vdec"
+#define FRAME_WIDTH  1280
+#define FRAME_HEIGHT 1024
+
+// Manufacturer's way
+//#define FRAME_SIZE_BYTES (3 * FRAME_WIDTH * FRAME_HEIGHT >> 1)
+#define FRAME_SIZE_BYTES (2 * FRAME_WIDTH * FRAME_HEIGHT)
 
 void ioctl_getinfo(int file_desc)
 {
@@ -57,7 +64,7 @@ void ioctl_power(int file_desc, int on)
   }
 }
 
-void ioctl_grab(int file_desc)
+void ioctl_grab(int file_desc, unsigned char *framebuf, UINT32 hwoffset)
 {
     int ret_val;
 
@@ -68,50 +75,47 @@ void ioctl_grab(int file_desc)
         exit(-1);
     }
 
-    printf("Mapping memory...\n");
-    unsigned char *framebuf;
+    printf("Configuring grab...\n");
     V8CIFPATHINFO cpath;
     cpath.dst_type = 0;
-    cpath.dst_width = 1280;
-    cpath.dst_height = 1024;
-
-    framebuf = malloc(1280*1024*2*3);
+    cpath.dst_width = FRAME_WIDTH;
+    cpath.dst_height = FRAME_HEIGHT;
 
     // Looks like these values are ignored by driver, setting these to 0 to crash if I'm wrong
-    cpath.dst_addr[0] = 0;
-    cpath.dst_addr[1] = 0;
-    cpath.dst_addr[2] = 0;
+    cpath.dst_addr[0] = hwoffset;
+    cpath.dst_addr[1] = hwoffset;
+    cpath.dst_addr[2] = hwoffset;
 
-    printf("Configuring grab...\n");
-    ret_val = ioctl(file_desc, V8CIF_CAPPATH_CFG, &cpath);
+    ret_val = ioctl(file_desc, V8CIF_PREPATH_CFG, &cpath);
     if (ret_val < 0) {
         printf ("ioctl grab failed:%d\n", ret_val);
         exit(-1);
     }
 
-   /*ret_val = ioctl(file_desc, V8CIF_SETPREVIEWSTOP, 0);
-   if (ret_val < 0) {
-     printf ("ioctl previewstop failed:%d\n", ret_val);
-     exit(-1);
-   }*/
+    /*ret_val = ioctl(file_desc, V8CIF_SETPREVIEWSTOP, 0);
+    if (ret_val < 0) {
+        printf ("ioctl previewstop failed:%d\n", ret_val);
+        exit(-1);
+    }*/
 
     printf("Begin cycle...\n");
     int gotdata = 0;
     while (!gotdata) {
         V8CIFFRMINFO frinfo;
-        frinfo.dst_addr_y = (UINT32)framebuf;
-        frinfo.dst_addr_uv = (UINT32)framebuf + 1280*1024;
-        frinfo.cap_mode = CAP_NORMAL;
+        frinfo.dst_addr_y = (UINT32)hwoffset;
+        frinfo.dst_addr_uv = (UINT32)hwoffset + FRAME_WIDTH * FRAME_HEIGHT;
+        frinfo.cap_mode = CAP_NORMAL; // Manufacturer uses 0
 
         printf(".");
-        ret_val = ioctl(file_desc, V8CIF_CAPPATH_GETFRM, &frinfo);
+        ret_val = ioctl(file_desc, V8CIF_PREPATH_GETFRM, &frinfo);
+        printf("[D] ioctl packet V8CIF_PREPATH_GETFRM our: %08X, manuf: %08X\n", V8CIF_PREPATH_GETFRM, 0x800C6308);
         if (ret_val < 0) {
             printf ("ioctl grab failed:%d\n", ret_val);
             exit(-1);
         }
 
         printf("[D] dst_addr: %08X\n", frinfo.dst_addr_y);
-        if (framebuf[0] || framebuf[100] || framebuf[200]) {
+        if (framebuf[0] || framebuf[100] || framebuf[200]) {  // Randomly test some pixels for data
             printf("We have the juice!\n");
             gotdata = 1;
         } else {
@@ -121,8 +125,7 @@ void ioctl_grab(int file_desc)
 
     printf("Got the frame! Saving...\n");
     FILE *fp = fopen("./capture.raw", "wb");
-    fwrite(framebuf, 1, 1280*1024*2*2, fp);
-    free(framebuf);
+    fwrite(framebuf, 1, FRAME_SIZE_BYTES, fp);
     fclose(fp);
 }
 
@@ -145,15 +148,53 @@ int opendev(const char *devname, int mode)
         http://www.phonesdevelopers.info/1722480/
         https://android.googlesource.com/platform/frameworks/native/+/252778f/libs/binder/MemoryHeapPmem.cpp
 */
-int PhyMemAlloc(int pmem_dev)
+void *PhyMemAlloc(int pmem_dev, struct pmem_region *sub)
 {
-    // TODO
-    return 0;
+    const size_t pagesize = getpagesize();
+    printf("[D] Page size: %d\n", pagesize);
+    
+    int size = sub->len;
+    size = (size + pagesize-1) & ~(pagesize-1);
+    
+    void *ptr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, pmem_dev, 0);  // prot == 3, flags == 1
+    printf("[D] ioctl command packet (should be 0x40047001): %08X\n", PMEM_MAP);
+
+    // Should be PMEM_MAP, but manufacturer uses "read" version: 0x40047001, and a weird argument
+    //int err = ioctl(pmem_dev, PMEM_MAP, sub);
+    UINT32 hwptr;
+    int err = ioctl(pmem_dev, 0x40047001, &hwptr);
+    sub->offset = hwptr;
+    if (err < 0) {
+        printf("PMEM_MAP failed (%s), mFD=%d, sub.offset=%lu, sub.size=%lu",
+                err, pmem_dev, sub->offset, sub->len);
+        exit(-1);
+    } else {
+        printf("PMEM_MAP success, sub.offset=%lu, sub.size=%lu\n",
+                sub->offset, sub->len);
+    }
+    
+    printf("Allocated userland ptr: %08X, hw offset: %08X\n", ptr, hwptr);
+    if (ptr) {
+        printf("Wiping %d bytes of memory...\n", sub->len);
+        memset(ptr, 0, size);
+    }
+    
+    return ptr;
 }
 
-void PhyMemFree(int pmem_dev)
+void PhyMemFree(int pmem_dev, void *ptr, struct pmem_region *sub)
 {
-    // TODO
+    if (munmap(ptr, sub->len) > 0) {
+        printf("Cannot munmap ptr: %08X, size: %d\n", ptr, sub->len);
+    }
+    
+    // Manufacturer doesn't use this part
+    /*int err = ioctl(pmem_dev, PMEM_UNMAP, &sub);
+    if (err < 0) {
+        printf("PMEM_UNMAP failed (%d), mFD=%d, sub.offset=%lu, sub.size=%lu\n",
+                err, pmem_dev, sub->offset, sub->len);
+        exit(-1);
+    }*/
 }
 
 void PhyMemInfo(int pmem_dev)
@@ -173,18 +214,22 @@ void main()
     camera_dev = opendev(DEVICE_FILE_NAME, O_RDONLY);
     pmem_dev = opendev(PMEM_VDEC_FILE_NAME, O_RDONLY);
 
-    // Get camera info
-    //ioctl_power(camera_dev, 1);
-    //ioctl_getinfo(camera_dev);
-    
     // Poke physmem mapper
+    printf("Mapping memory...\n");
+    struct pmem_region sub = { 0, FRAME_SIZE_BYTES };
+    void *ptr = PhyMemAlloc(pmem_dev, &sub);
+
     PhyMemInfo(pmem_dev);
     
     // Grab some
-    //ioctl_power(camera_dev, 1);  // Turn on
+    ioctl_power(camera_dev, 1);  // Turn on
+    ioctl_getinfo(camera_dev);  // Get camera info
+
     //sleep(3);
-    //ioctl_grab(camera_dev);
-    //ioctl_power(camera_dev, 0);  // Turn off
+    ioctl_grab(camera_dev, ptr, sub.offset);
+    ioctl_power(camera_dev, 0);  // Turn off
+
+    PhyMemFree(pmem_dev, ptr, &sub);
 
     close(camera_dev);
     close(pmem_dev);
