@@ -15,8 +15,30 @@
 
 #define DEVICE_FILE_NAME "/dev/cif"
 #define PMEM_VDEC_FILE_NAME "/dev/pmem-vdec"
-#define FRAME_WIDTH  1280
-#define FRAME_HEIGHT 1024
+
+// Sensor mode selector
+#if 0
+    // Mode 1 (photo only?)
+    #define SENSOR_MODE  1
+    #define FRAME_WIDTH  1280
+    #define FRAME_HEIGHT 1024
+#else
+    // Mode 2 (video?)
+    #define SENSOR_MODE  0
+    #define FRAME_WIDTH  640
+    #define FRAME_HEIGHT 480
+#endif
+
+// Capture mode selector
+#if 0
+    // For preview
+    #define IO_CFG_REQUEST V8CIF_PREPATH_CFG
+    #define IO_FRAME_REQUEST V8CIF_PREPATH_GETFRM
+#else
+    // For capture (quicker than preview)
+    #define IO_CFG_REQUEST V8CIF_CAPPATH_CFG
+    #define IO_FRAME_REQUEST V8CIF_RECORD_GETFRM
+#endif
 
 // Manufacturer's way
 //#define FRAME_SIZE_BYTES (3 * FRAME_WIDTH * FRAME_HEIGHT >> 1)
@@ -73,7 +95,7 @@ void ioctl_grab(int file_desc, unsigned char *framebuf, UINT32 hwoffset)
     int ret_val;
 
     LOG("Setting resolution...\n");
-    ret_val = ioctl(file_desc, V8CIF_SNR_CFG, 1);  // Set max resolution
+    ret_val = ioctl(file_desc, V8CIF_SNR_CFG, SENSOR_MODE);  // Set resolution (and fps?)
     if (ret_val < 0) {
         LOG("ioctl set resolution failed:%d\n", ret_val);
         exit(-1);
@@ -90,7 +112,7 @@ void ioctl_grab(int file_desc, unsigned char *framebuf, UINT32 hwoffset)
     cpath.dst_addr[1] = hwoffset;
     cpath.dst_addr[2] = hwoffset;
 
-    ret_val = ioctl(file_desc, V8CIF_PREPATH_CFG, &cpath);
+    ret_val = ioctl(file_desc, IO_CFG_REQUEST, &cpath);
     if (ret_val < 0) {
         LOG("ioctl grab failed:%d\n", ret_val);
         exit(-1);
@@ -109,17 +131,15 @@ void ioctl_grab(int file_desc, unsigned char *framebuf, UINT32 hwoffset)
         frinfo.dst_addr_uv = (UINT32)hwoffset + FRAME_WIDTH * FRAME_HEIGHT;
         frinfo.cap_mode = CAP_NORMAL; // Manufacturer uses 0
 
-        ret_val = ioctl(file_desc, V8CIF_PREPATH_GETFRM, &frinfo);
-        //LOG("[D] ioctl packet V8CIF_PREPATH_GETFRM our: %08X, manuf: %08X\n", V8CIF_PREPATH_GETFRM, 0x800C6308);
+        ret_val = ioctl(file_desc, IO_FRAME_REQUEST, &frinfo);
         if (ret_val < 0) {
             LOG("ioctl grab failed:%d\n", ret_val);
             exit(-1);
         }
         
-        // TODO: decode?
         // Stream to stdout
         fwrite(framebuf, 1, FRAME_SIZE_BYTES, stdout);
-        usleep(200000);
+        //usleep(200000); // Pause between frames, removed as capturing a frames takes long time already
     }
     LOG("Finished cycle.\n");
 }
@@ -212,6 +232,7 @@ void sig_handler(int signum)
 void main()
 {
     signal(SIGINT, sig_handler);
+    signal(SIGPIPE, sig_handler);
 
     int camera_dev, pmem_dev, ret_val;
     camera_dev = opendev(DEVICE_FILE_NAME, O_RDONLY);
@@ -223,17 +244,24 @@ void main()
     void *ptr = PhyMemAlloc(pmem_dev, &sub);
 
     PhyMemInfo(pmem_dev);
+
+    LOG("[D] ioctl packet codes:\n");
+    LOG("\tV8CIF_PREPATH_GETFRM our: %08X, manuf: %08X\n", V8CIF_PREPATH_GETFRM, 0x800C6307);
+    LOG("\tV8CIF_CAPPATH_GETFRM our: %08X, manuf: %08X\n", V8CIF_CAPPATH_GETFRM, 0x800C6308);
+    LOG("\tV8CIF_RECORD_GETFRM our: %08X, manuf: %08X\n", V8CIF_RECORD_GETFRM, 0x800C630E);
+    LOG("\tV8CIF_PREPATH_CFG our: %08X, manuf: %08X\n", V8CIF_PREPATH_CFG, 0x0);
+    LOG("\tV8CIF_CAPPATH_CFG our: %08X, manuf: %08X\n", V8CIF_CAPPATH_CFG, 0x0);
     
     // Grab some
     ioctl_power(camera_dev, 1);  // Turn on
     ioctl_getinfo(camera_dev);  // Get camera info
 
-    //sleep(3);
     ioctl_grab(camera_dev, ptr, sub.offset);
     ioctl_power(camera_dev, 0);  // Turn off
 
     PhyMemFree(pmem_dev, ptr, &sub);
 
+    LOG("Closing...\n");
     close(camera_dev);
     close(pmem_dev);
 }

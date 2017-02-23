@@ -19,5 +19,5 @@ Capturing raw stream:
 
 Encoding pipeline (experimental):
 ```
-    ./ioctl | ffmpeg -pix_fmt yuyv422 -s 1280x1024 -i - -vcodec libx264 -preset fast capture.mp4
+    ./ioctl | ffmpeg -f rawvideo -pix_fmt yuyv422 -s 1280x1024 -i - -vcodec libx264 -preset ultrafast capture.mp4
 ```
